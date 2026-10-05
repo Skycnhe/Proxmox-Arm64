@@ -1,0 +1,81 @@
+name: Build and Release Firmware
+
+on:
+  # 方式 1：推送到带 v 前缀的 tag 时自动触发（例如: git push origin v1.0.0）
+  push:
+    tags:
+      - 'v*.*.*'
+  # 方式 2：在 GitHub 网页端的 Actions 页面手动点击 "Run workflow" 运行
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: '发布版本号（留空则不创建 Release，仅保留构建附件）'
+        required: false
+        default: ''
+
+# 赋予创建和写入 Release 的权限
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Firmware
+    runs-on: ubuntu-latest
+
+    steps:
+      # 第一步：检出代码
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive # 若有子模块请开启
+
+      # 第二步：安装编译依赖环境
+      # （根据你的项目替换，例如 GCC、ARM 工具链、PlatformIO、Rust 或 OpenWrt 编译依赖）
+      - name: Set up Build Environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-none-eabi build-essential xz-utils
+
+      # 第三步：执行固件编译
+      # （请将这里的命令替换为你项目的实际构建命令）
+      - name: Compile Firmware
+        run: |
+          mkdir -p output
+          echo "正在编译固件..."
+          # 示例：假设你的项目用 make 编译，或调用自定义构建脚本
+          # make all
+          # 生成示例固件文件用于测试流程：
+          echo "Firmware Binary Data" > output/firmware.bin
+          echo "Firmware Archive" > output/firmware.tar.gz
+
+      # 第四步：计算固件哈希校验值（建议提供 SHA256）
+      - name: Generate Checksums
+        run: |
+          cd output
+          sha256sum * > sha256sums.txt
+          cat sha256sums.txt
+
+      # 第五步：上传构建产物到 GitHub Actions Artifacts（供单次构建临时下载备份，保留 7 天）
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-build-output
+          path: output/
+          retention-days: 7
+
+      # 第六步：自动发布到 GitHub Releases
+      # 仅在触发条件为 Tag 推送，或者手动运行指定了版本号时执行
+      - name: Publish Release
+        if: startsWith(github.ref, 'refs/tags/') || github.event.inputs.release_tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          # 版本标签：优先取手动输入的 tag，否则取 git ref 对应的 tag
+          tag_name: ${{ github.event.inputs.release_tag || github.ref_name }}
+          name: Firmware Release ${{ github.event.inputs.release_tag || github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true # 自动从 PR / Commit 提取更新日志
+          files: |
+            output/firmware.bin
+            output/firmware.tar.gz
+            output/sha256sums.txt
